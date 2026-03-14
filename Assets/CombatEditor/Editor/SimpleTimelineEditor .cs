@@ -9,6 +9,9 @@ public class SingleEffectData
     public int startTimeMs;          // 特效开始时间（毫秒）
     public readonly int fixedDurationMs = 500; // 特效固定时长（不可修改）
     public GameObject effectPrefab;  // 特效预制体
+    public string anchorPoint = "Root"; // 锚点
+    public string id = "effect_001";  // 特效ID
+    public bool isHidden = false;     // 是否隐藏
 }
 
 [System.Serializable]
@@ -18,7 +21,7 @@ public class SingleEffectTrack
     public SingleEffectData effect = new SingleEffectData();
 }
 
-// 最终版：修复Layout报错 + 绿块拖动 + 游标交互
+// 最终版：匹配图片界面要求
 public class FinalTimelineEditor : EditorWindow
 {
     // 核心时间数据（毫秒单位）
@@ -40,14 +43,16 @@ public class FinalTimelineEditor : EditorWindow
     private const float labelWidth = 100f;
     private const float timeAxisHeight = 30f;
 
-    // 刻度精度
-    private const int smallSnapMs = 10;   // 小刻度：10ms
-    private const int bigSnapMs = 500;    // 大刻度：500ms
+    // 刻度精度（1ms最小刻度，50ms中等刻度，500ms大刻度）
+    private const int smallSnapMs = 1;    // 最小刻度：1ms
+    private const int midSnapMs = 50;     // 中等刻度：50ms
+    private const int bigSnapMs = 500;    // 大刻度：500ms（显示数字）
 
     // 拖动状态
     private bool isDraggingTimeline = false;
     private bool isDraggingPointer = false;
     private SingleEffectData draggedEffect = null;
+    private SingleEffectTrack selectedTrack = null; // 选中的轨道
 
     private Vector2 dragStartMousePos;
     private Vector2 dragStartScrollPos;
@@ -67,16 +72,16 @@ public class FinalTimelineEditor : EditorWindow
         // 初始化默认轨道
         if (effectTracks.Count == 0)
         {
-            effectTracks.Add(new SingleEffectTrack { trackName = "特效1", effect = new SingleEffectData { startTimeMs = 0 } });
-            effectTracks.Add(new SingleEffectTrack { trackName = "特效2", effect = new SingleEffectData { startTimeMs = 600 } });
-            effectTracks.Add(new SingleEffectTrack { trackName = "特效3", effect = new SingleEffectData { startTimeMs = 100 } });
+            effectTracks.Add(new SingleEffectTrack { trackName = "特效1", effect = new SingleEffectData { startTimeMs = 0, id = "effect_001" } });
+            effectTracks.Add(new SingleEffectTrack { trackName = "特效2", effect = new SingleEffectData { startTimeMs = 600, id = "effect_002" } });
+            effectTracks.Add(new SingleEffectTrack { trackName = "特效3", effect = new SingleEffectData { startTimeMs = 100, id = "effect_003" } });
         }
     }
 
     void OnGUI()
     {
-        // 1. 播放控制栏
-        DrawPlaybackControls();
+        // 1. 顶部控制栏（包含拖入区域）
+        DrawTopControlBar();
         EditorGUILayout.Space(5);
 
         // 2. 时间轴主区域
@@ -91,10 +96,10 @@ public class FinalTimelineEditor : EditorWindow
             // 绘制动画长度轨道
             DrawAnimationTrack();
 
-            // 绘制所有特效轨道
+            // 绘制所有特效轨道（带选中/隐藏/移除）
             for (int i = 0; i < effectTracks.Count; i++)
             {
-                DrawSingleEffectTrack(effectTracks[i], i + 1);
+                DrawSingleEffectTrackWithOps(effectTracks[i], i + 1);
             }
 
             // 添加新轨道按钮
@@ -103,7 +108,7 @@ public class FinalTimelineEditor : EditorWindow
                 effectTracks.Add(new SingleEffectTrack
                 {
                     trackName = $"特效{effectTracks.Count + 1}",
-                    effect = new SingleEffectData { startTimeMs = Mathf.RoundToInt(currentTimeMs) }
+                    effect = new SingleEffectData { startTimeMs = Mathf.RoundToInt(currentTimeMs), id = $"effect_{effectTracks.Count + 1:000}" }
                 });
             }
 
@@ -112,13 +117,16 @@ public class FinalTimelineEditor : EditorWindow
         }
         EditorGUILayout.EndScrollView();
 
-        // 3. 播放逻辑
+        // 3. 底部信息面板（显示选中特效详情）
+        DrawBottomInfoPanel();
+
+        // 4. 播放逻辑
         UpdatePlayback();
     }
 
-    #region 界面绘制
-    // 播放控制与缩放栏
-    void DrawPlaybackControls()
+    #region 新增界面绘制
+    // 顶部控制栏（包含拖入区域）
+    void DrawTopControlBar()
     {
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -151,6 +159,11 @@ public class FinalTimelineEditor : EditorWindow
             // 动画总时长设置
             animationTotalMs = EditorGUILayout.IntField("动画总时长(ms)", animationTotalMs, GUILayout.Width(120));
 
+            // 拖入区域
+            GUILayout.FlexibleSpace();
+            GUILayout.Label("拖入GameObject", EditorStyles.boldLabel, GUILayout.Width(150));
+            GUILayout.Label("拖入动画片段", EditorStyles.boldLabel, GUILayout.Width(150));
+
             // 缩放控制
             GUILayout.FlexibleSpace();
             EditorGUILayout.LabelField("缩放:", GUILayout.Width(50));
@@ -159,29 +172,110 @@ public class FinalTimelineEditor : EditorWindow
         }
     }
 
-    // 绘制时间刻度轴（10ms小刻度，500ms大刻度）
+    // 绘制单个特效轨道（带选中/隐藏/移除按钮）
+    void DrawSingleEffectTrackWithOps(SingleEffectTrack track, int index)
+    {
+        float y = timeAxisHeight + (index) * (trackHeight + trackPadding);
+        Rect trackRect = new Rect(labelWidth, y, position.width - labelWidth - 20, trackHeight);
+
+        // 轨道背景（选中时高亮）
+        Color bgColor = selectedTrack == track ? new Color(0.3f, 0.3f, 0.3f) : new Color(0.2f, 0.2f, 0.2f);
+        EditorGUI.DrawRect(trackRect, bgColor);
+
+        // 轨道名称 + 操作按钮
+        GUILayout.BeginArea(new Rect(0, y, labelWidth, trackHeight));
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            // 选中轨道
+            if (GUILayout.Button(track.trackName, EditorStyles.label, GUILayout.Width(60)))
+            {
+                selectedTrack = track;
+            }
+            // 隐藏按钮
+            track.effect.isHidden = GUILayout.Toggle(track.effect.isHidden, "隐藏", GUILayout.Width(40));
+            // 移除按钮
+            if (GUILayout.Button("移除", GUILayout.Width(40)))
+            {
+                effectTracks.Remove(track);
+                if (selectedTrack == track) selectedTrack = null;
+            }
+        }
+        GUILayout.EndArea();
+
+        // 绘制绿色特效块（隐藏时不显示）
+        if (!track.effect.isHidden)
+        {
+            DrawEffectClip(track.effect, y);
+        }
+
+        // 特效预制体选择框
+        track.effect.effectPrefab = (GameObject)EditorGUI.ObjectField(
+            new Rect(trackRect.xMax + 10, y, 200, trackHeight),
+            track.effect.effectPrefab,
+            typeof(GameObject),
+            true
+        );
+    }
+
+    // 底部信息面板（显示选中特效详情）
+    void DrawBottomInfoPanel()
+    {
+        EditorGUILayout.Space(10);
+        EditorGUILayout.LabelField("特效详细信息", EditorStyles.boldLabel);
+        EditorGUILayout.BeginVertical("box");
+
+        if (selectedTrack != null)
+        {
+            var effect = selectedTrack.effect;
+            EditorGUILayout.LabelField($"轨道名称: {selectedTrack.trackName}");
+            EditorGUILayout.LabelField($"特效ID: {effect.id}");
+            EditorGUILayout.LabelField($"开始时间: {effect.startTimeMs} ms");
+            EditorGUILayout.LabelField($"持续时间: {effect.fixedDurationMs} ms");
+            EditorGUILayout.LabelField($"锚点: {effect.anchorPoint}");
+            EditorGUILayout.ObjectField("特效资源:", effect.effectPrefab, typeof(GameObject), true);
+        }
+        else
+        {
+            EditorGUILayout.LabelField("请选择一个特效轨道查看详情");
+        }
+
+        EditorGUILayout.EndVertical();
+    }
+    #endregion
+
+    #region 原有界面绘制（保持不变）
+    // 绘制时间刻度轴（1ms小刻度，50ms中等刻度，500ms大刻度）
     void DrawTimeAxis()
     {
         Rect axisRect = new Rect(labelWidth, 0, position.width - labelWidth - 20, timeAxisHeight);
         EditorGUI.DrawRect(axisRect, new Color(0.15f, 0.15f, 0.15f, 1f));
 
-        // 绘制刻度线
+        // 1ms 步长绘制所有刻度
         for (int t = 0; t <= animationTotalMs; t += smallSnapMs)
         {
             float x = labelWidth + t * timeScale - scrollPos.x;
             if (x < labelWidth - 20 || x > position.width - 20) continue;
 
-            // 不同刻度高度区分
+            // 区分不同刻度高度
             float lineHeight;
-            if (t % bigSnapMs == 0) lineHeight = timeAxisHeight * 0.7f;   // 大刻度
-            else if (t % 100 == 0) lineHeight = timeAxisHeight * 0.4f;   // 中等刻度
-            else lineHeight = timeAxisHeight * 0.2f;                      // 小刻度
+            if (t % bigSnapMs == 0)
+            {
+                // 500ms 大刻度（最长 + 显示数字）
+                lineHeight = timeAxisHeight * 0.7f;
+                GUI.Label(new Rect(x - 20, axisRect.y, 30, timeAxisHeight * 0.5f), $"{t}");
+            }
+            else if (t % midSnapMs == 0)
+            {
+                // 50ms 中等刻度（中等长度）
+                lineHeight = timeAxisHeight * 0.4f;
+            }
+            else
+            {
+                // 1ms 最小刻度（最短）
+                lineHeight = timeAxisHeight * 0.2f;
+            }
 
             EditorGUI.DrawRect(new Rect(x, axisRect.y, 1, lineHeight), Color.gray);
-
-            // 大刻度显示数字
-            if (t % bigSnapMs == 0)
-                GUI.Label(new Rect(x - 20, axisRect.y, 30, timeAxisHeight * 0.5f), $"{t}");
         }
     }
 
@@ -197,28 +291,6 @@ public class FinalTimelineEditor : EditorWindow
         // 黄色动画时长条
         float barWidth = animationTotalMs * timeScale;
         EditorGUI.DrawRect(new Rect(labelWidth - scrollPos.x, y, barWidth, trackHeight), Color.yellow);
-    }
-
-    // 绘制单个特效轨道
-    void DrawSingleEffectTrack(SingleEffectTrack track, int index)
-    {
-        float y = timeAxisHeight + (index) * (trackHeight + trackPadding);
-        Rect trackRect = new Rect(labelWidth, y, position.width - labelWidth - 20, trackHeight);
-
-        // 轨道背景
-        EditorGUI.DrawRect(trackRect, new Color(0.2f, 0.2f, 0.2f, 0.8f));
-        GUI.Label(new Rect(0, y, labelWidth, trackHeight), track.trackName);
-
-        // 绘制绿色特效块
-        DrawEffectClip(track.effect, y);
-
-        // 特效预制体选择框
-        track.effect.effectPrefab = (GameObject)EditorGUI.ObjectField(
-            new Rect(trackRect.xMax + 10, y, 200, trackHeight),
-            track.effect.effectPrefab,
-            typeof(GameObject),
-            true
-        );
     }
 
     // 绘制绿色特效块（仅绘制，事件交给ProcessMainInteraction处理）
@@ -244,7 +316,7 @@ public class FinalTimelineEditor : EditorWindow
     }
     #endregion
 
-    #region 交互逻辑
+    #region 交互逻辑（保持不变）
     // 核心交互处理（绿块优先响应）
     void ProcessMainInteraction()
     {
@@ -272,6 +344,8 @@ public class FinalTimelineEditor : EditorWindow
         bool clickedOnClip = false;
         foreach (var track in effectTracks)
         {
+            if (track.effect.isHidden) continue; // 隐藏的轨道不响应点击
+
             float y = timeAxisHeight + (effectTracks.IndexOf(track) + 1) * (trackHeight + trackPadding);
             float x = labelWidth + track.effect.startTimeMs * timeScale - scrollPos.x;
             float w = track.effect.fixedDurationMs * timeScale;
@@ -282,6 +356,7 @@ public class FinalTimelineEditor : EditorWindow
                 draggedEffect = track.effect;
                 dragStartStartTimeMs = track.effect.startTimeMs;
                 dragStartMousePos = evt.mousePosition;
+                selectedTrack = track; // 点击绿块时同时选中轨道
                 clickedOnClip = true;
                 evt.Use();
                 break;
@@ -306,7 +381,7 @@ public class FinalTimelineEditor : EditorWindow
                 float timeX = clickX - labelWidth + scrollPos.x;
                 float newTime = timeX / timeScale;
 
-                // 对齐到10ms刻度
+                // 对齐到1ms刻度
                 newTime = Mathf.RoundToInt(newTime / smallSnapMs) * smallSnapMs;
                 currentTimeMs = Mathf.Clamp(newTime, 0, animationTotalMs);
 
@@ -340,7 +415,7 @@ public class FinalTimelineEditor : EditorWindow
             float timeX = mouseX - labelWidth + scrollPos.x;
             float newTime = timeX / timeScale;
 
-            // 对齐到10ms刻度
+            // 对齐到1ms刻度
             newTime = Mathf.RoundToInt(newTime / smallSnapMs) * smallSnapMs;
             currentTimeMs = Mathf.Clamp(newTime, 0, animationTotalMs);
 
@@ -368,7 +443,7 @@ public class FinalTimelineEditor : EditorWindow
         Vector2 delta = evt.mousePosition - dragStartMousePos;
         int deltaMs = Mathf.RoundToInt(delta.x / timeScale);
 
-        // 计算新位置（对齐10ms刻度）
+        // 计算新位置（对齐1ms刻度）
         int newStartTime = dragStartStartTimeMs + deltaMs;
         newStartTime = Mathf.RoundToInt(newStartTime / (float)smallSnapMs) * smallSnapMs;
 
@@ -382,7 +457,7 @@ public class FinalTimelineEditor : EditorWindow
     }
     #endregion
 
-    #region 播放逻辑
+    #region 播放逻辑（保持不变）
     void UpdatePlayback()
     {
         if (!isPlaying) return;
