@@ -1,6 +1,7 @@
 ﻿using UnityEditor;
 using UnityEngine;
 using System.Collections.Generic;
+using System.Linq;
 
 [System.Serializable]
 public class EffectData
@@ -42,14 +43,14 @@ public class AudioTrack
     public AudioData audio = new AudioData();
 }
 
-public class FinalTimelineEditor : EditorWindow
+public class SJActionEditor : EditorWindow
 {
     // 核心时间数据：分离动画时长和总表现时间
     private int totalTimelineMs = 1000;  // 整体表现时间（可自定义）
     private int animationDurationMs = 1000; // 动画自身时长（由动画片段决定）
     private List<EffectTrack> effectTracks = new List<EffectTrack>();
     private List<AudioTrack> audioTracks = new List<AudioTrack>();
-    private AnimationClip currentAnimationClip;
+    private AnimationClip currentAnimationClip; // 当前选中的动画片段
     private GameObject targetGameObject;
     private Animation targetAnimation;
     private AudioSource audioSource; // 音频播放源
@@ -91,11 +92,16 @@ public class FinalTimelineEditor : EditorWindow
 
     private GameObject targetObject = null;
 
-    [MenuItem("Tools/最终版时间轴编辑器")]
+    // 存储目标物体的动画片段（用于下拉选择）
+    private List<AnimationClip> targetAnimClips = new List<AnimationClip>();
+    private string[] animClipNames; // 动画片段名称数组（用于下拉框）
+    private int selectedAnimIndex = -1; // 当前选中的动画索引
+
+    [MenuItem("Tools/赛季动作编辑器")]
     static void OpenWindow()
     {
-        var window = GetWindow<FinalTimelineEditor>();
-        window.titleContent = new GUIContent("最终版时间轴编辑器");
+        var window = GetWindow<SJActionEditor>();
+        window.titleContent = new GUIContent("赛季动作编辑器");
         window.minSize = new Vector2(800, 400);
         window.Show();
     }
@@ -136,7 +142,7 @@ public class FinalTimelineEditor : EditorWindow
         EditorApplication.update -= UpdateEditor;
     }
 
-    // 新增：强制编辑器每帧刷新，确保粒子状态更新
+    // 强制编辑器每帧刷新，确保粒子状态更新
     void UpdateEditor()
     {
         if (isPlaying)
@@ -164,24 +170,38 @@ public class FinalTimelineEditor : EditorWindow
             for (int i = 0; i < audioTracks.Count; i++)
                 DrawSingleAudioTrackWithOps(audioTracks[i], effectTracks.Count + i + 1);
 
-            // 添加轨道按钮
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("+ 添加特效轨道", GUILayout.Width(150)))
+                // 绘制下拉按钮
+                if (EditorGUILayout.DropdownButton(new GUIContent("+ 添加轨道"), FocusType.Keyboard, GUILayout.Width(80)))
                 {
-                    effectTracks.Add(new EffectTrack
+                    // 创建下拉菜单
+                    GenericMenu menu = new GenericMenu();
+
+                    // 添加特效轨道选项
+                    menu.AddItem(new GUIContent("特效轨道"), false, () =>
                     {
-                        trackName = $"特效{effectTracks.Count + 1}",
-                        effect = new EffectData { startTimeMs = currentTimeMs, resID = 0 }
+                        effectTracks.Add(new EffectTrack
+                        {
+                            trackName = $"特效{effectTracks.Count + 1}",
+                            effect = new EffectData { startTimeMs = currentTimeMs, resID = 0 }
+                        });
+                        Repaint();
                     });
-                }
-                if (GUILayout.Button("+ 添加音频轨道", GUILayout.Width(150)))
-                {
-                    audioTracks.Add(new AudioTrack
+
+                    // 添加音频轨道选项
+                    menu.AddItem(new GUIContent("音频轨道"), false, () =>
                     {
-                        trackName = $"音频{audioTracks.Count + 1}",
-                        audio = new AudioData { startTimeMs = currentTimeMs, durationMs = 1000 }
+                        audioTracks.Add(new AudioTrack
+                        {
+                            trackName = $"音频{audioTracks.Count + 1}",
+                            audio = new AudioData { startTimeMs = currentTimeMs, durationMs = 1000 }
+                        });
+                        Repaint();
                     });
+
+                    // 显示菜单
+                    menu.ShowAsContext();
                 }
             }
 
@@ -193,7 +213,7 @@ public class FinalTimelineEditor : EditorWindow
         UpdatePlaybackAndSample();
     }
 
-    #region 顶部控制栏（播放一次后回到开头）
+    #region 顶部控制栏（全版本兼容的动画选择方案）
     void DrawTopControlBar()
     {
         using (new EditorGUILayout.HorizontalScope())
@@ -246,28 +266,64 @@ public class FinalTimelineEditor : EditorWindow
             totalTimelineMs = EditorGUILayout.IntField(totalTimelineMs, GUILayout.Width(80));
 
             // 目标物体输入框（左移+加宽）
-            GUILayout.FlexibleSpace();
-            targetObject = (GameObject)EditorGUILayout.ObjectField(
-                "目标物体",
+            GUILayout.Label("目标物体:", GUILayout.Width(70));
+            GameObject newTargetObject = (GameObject)EditorGUILayout.ObjectField(
                 targetObject,
                 typeof(GameObject),
                 true,
-                GUILayout.Width(300) // 加宽显示
+                GUILayout.MaxWidth(200)
             );
-            if (targetObject != null && targetGameObject != targetObject)
+
+            // 检测目标物体是否变更
+            if (newTargetObject != targetObject)
             {
-                targetGameObject = targetObject;
-                targetAnimation = targetGameObject.GetComponent<Animation>();
-                if (targetAnimation != null && targetAnimation.clip != null)
+                targetObject = newTargetObject;
+                if (targetObject != null)
                 {
-                    currentAnimationClip = targetAnimation.clip;
-                    // 更新动画时长（由动画片段决定）
-                    animationDurationMs = Mathf.RoundToInt(currentAnimationClip.length * 1000);
+                    targetGameObject = targetObject;
+                    targetAnimation = targetGameObject.GetComponent<Animation>();
+                    // 提取目标物体的动画片段并初始化下拉框
+                    ExtractTargetAnimationClips();
+                    // 清空当前选中的动画
+                    currentAnimationClip = null;
+                    animationDurationMs = 1000;
+                    selectedAnimIndex = -1;
                 }
                 else
                 {
-                    EditorUtility.DisplayDialog("提示", "该GameObject无Animation组件或未绑定动画片段！", "确定");
+                    targetAnimation = null;
+                    currentAnimationClip = null;
+                    animationDurationMs = 1000;
+                    targetAnimClips.Clear();
+                    animClipNames = new string[0];
+                    selectedAnimIndex = -1;
                 }
+            }
+
+            // 动画选择下拉框（全版本兼容方案）
+            GUILayout.Label("选择动画:", GUILayout.Width(70));
+            if (targetAnimClips.Count > 0)
+            {
+                // 绘制下拉选择框
+                int newSelectedIndex = EditorGUILayout.Popup(
+                    selectedAnimIndex,
+                    animClipNames,
+                    GUILayout.Width(150)
+                );
+
+                // 检测选择变更
+                if (newSelectedIndex != selectedAnimIndex && newSelectedIndex >= 0 && newSelectedIndex < targetAnimClips.Count)
+                {
+                    selectedAnimIndex = newSelectedIndex;
+                    currentAnimationClip = targetAnimClips[selectedAnimIndex];
+                    animationDurationMs = Mathf.RoundToInt(currentAnimationClip.length * 1000);
+                    Repaint();
+                }
+            }
+            else
+            {
+                // 无动画时显示提示
+                EditorGUILayout.LabelField("无可用动画", GUILayout.Width(150));
             }
 
             // 缩放控制
@@ -279,7 +335,40 @@ public class FinalTimelineEditor : EditorWindow
     }
     #endregion
 
-    #region 轨道绘制（删除按钮移到左侧）
+    #region 提取目标物体的动画片段并初始化下拉框
+    private void ExtractTargetAnimationClips()
+    {
+        targetAnimClips.Clear();
+
+        if (targetAnimation == null)
+        {
+            animClipNames = new string[0];
+            return;
+        }
+
+        // 提取目标物体Animation组件中的所有动画片段
+        foreach (AnimationState state in targetAnimation)
+        {
+            if (state.clip != null && !targetAnimClips.Contains(state.clip))
+            {
+                targetAnimClips.Add(state.clip);
+            }
+        }
+
+        // 初始化下拉框名称数组
+        if (targetAnimClips.Count > 0)
+        {
+            animClipNames = targetAnimClips.Select(clip => clip.name).ToArray();
+        }
+        else
+        {
+            animClipNames = new string[0];
+            EditorUtility.DisplayDialog("提示", "该物体的Animation组件中未找到任何动画片段！", "确定");
+        }
+    }
+    #endregion
+
+    #region 轨道绘制
     void DrawSingleEffectTrackWithOps(EffectTrack track, int index)
     {
         float y = topExtraSpace + timeAxisHeight + trackPadding + (index) * (trackHeight + trackPadding);
@@ -394,12 +483,25 @@ public class FinalTimelineEditor : EditorWindow
     }
     #endregion
 
-    #region 底部信息面板（持续时间可编辑）
+    #region 底部信息面板
     void DrawBottomInfoPanel()
     {
         EditorGUILayout.Space(10);
         EditorGUILayout.LabelField("详细信息", EditorStyles.boldLabel);
         EditorGUILayout.BeginVertical("box");
+
+        // 显示当前选中的动画信息
+        if (currentAnimationClip != null)
+        {
+            EditorGUILayout.LabelField($"当前动画: {currentAnimationClip.name}");
+            EditorGUILayout.LabelField($"动画时长: {animationDurationMs} ms");
+            EditorGUILayout.Separator();
+        }
+        else
+        {
+            EditorGUILayout.LabelField("未选择动画片段，请从下拉框选择", EditorStyles.miniLabel);
+            EditorGUILayout.Separator();
+        }
 
         if (selectedEffectTrack != null)
         {
@@ -429,7 +531,7 @@ public class FinalTimelineEditor : EditorWindow
     }
     #endregion
 
-    #region 基础界面绘制（动画时长显示移到指定位置）
+    #region 基础界面绘制
     // 刻度对齐修复：统一使用labelWidth作为起始X坐标，长度与轨道对齐
     void DrawTimeAxisWithExtraSpace()
     {
@@ -452,7 +554,7 @@ public class FinalTimelineEditor : EditorWindow
         }
 
         // 绘制动画时长分割线（区分动画和后续表现时间）
-        if (animationDurationMs > 0 && animationDurationMs < totalTimelineMs)
+        if (currentAnimationClip != null && animationDurationMs > 0 && animationDurationMs < totalTimelineMs)
         {
             float splitX = labelWidth + animationDurationMs * timeScale - scrollPos.x;
             EditorGUI.DrawRect(new Rect(splitX, axisRect.y, 2, timeAxisHeight), Color.yellow);
@@ -466,27 +568,34 @@ public class FinalTimelineEditor : EditorWindow
         float y = topExtraSpace + timeAxisHeight + trackPadding;
         Rect trackRect = new Rect(labelWidth, y, position.width - labelWidth - rightBtnMargin - 20, trackHeight);
         EditorGUI.DrawRect(trackRect, new Color(0.2f, 0.2f, 0.2f, 0.8f));
-        GUI.Label(new Rect(0, y - 10, labelWidth, trackHeight), "动画长度");
+
+        // 显示当前选中的动画名称
+        string animName = currentAnimationClip != null ? currentAnimationClip.name : "未选择动画";
+        GUI.Label(new Rect(0, y - 10, labelWidth, trackHeight), $"动画: {animName}");
 
         // 动画时长显示：左侧可复制不可编辑文本框
         GUILayout.BeginArea(new Rect(0, y + 10, labelWidth, trackHeight));
         GUI.enabled = false;
-        EditorGUILayout.TextField($"{animationDurationMs}");
+        string durationText = currentAnimationClip != null ? $"{animationDurationMs} ms" : "0 ms";
+        EditorGUILayout.TextField(durationText);
         GUI.enabled = true;
         GUILayout.EndArea();
 
-
-        // 动画条宽度基于动画自身时长
-        float barWidth = animationDurationMs * timeScale;
-        EditorGUI.DrawRect(new Rect(labelWidth - scrollPos.x, y, barWidth, trackHeight), Color.yellow);
-
-        // 绘制总表现时间背景（灰色）
-        if (totalTimelineMs > animationDurationMs)
+        // 只有选中动画后才绘制动画条
+        if (currentAnimationClip != null)
         {
-            float extraWidth = (totalTimelineMs - animationDurationMs) * timeScale;
-            float extraX = labelWidth + animationDurationMs * timeScale - scrollPos.x;
-            EditorGUI.DrawRect(new Rect(extraX, y, extraWidth, trackHeight), new Color(0.3f, 0.3f, 0.3f, 0.8f));
-            GUI.Label(new Rect(extraX + 10, y, 100, trackHeight), "后续表现时间");
+            // 动画条宽度基于动画自身时长
+            float barWidth = animationDurationMs * timeScale;
+            EditorGUI.DrawRect(new Rect(labelWidth - scrollPos.x, y, barWidth, trackHeight), Color.yellow);
+
+            // 绘制总表现时间背景（灰色）
+            if (totalTimelineMs > animationDurationMs)
+            {
+                float extraWidth = (totalTimelineMs - animationDurationMs) * timeScale;
+                float extraX = labelWidth + animationDurationMs * timeScale - scrollPos.x;
+                EditorGUI.DrawRect(new Rect(extraX, y, extraWidth, trackHeight), new Color(0.3f, 0.3f, 0.3f, 0.8f));
+                GUI.Label(new Rect(extraX + 10, y, 100, trackHeight), "后续表现时间");
+            }
         }
     }
 
@@ -500,7 +609,7 @@ public class FinalTimelineEditor : EditorWindow
     }
     #endregion
 
-    #region 交互逻辑（播放一次后回到开头）
+    #region 交互逻辑
     void ProcessMainInteraction()
     {
         Event evt = Event.current;
@@ -596,6 +705,8 @@ public class FinalTimelineEditor : EditorWindow
                     track.effect.isParticleInit = false;
                 }
                 Repaint();
+                // 点击刻度后，直接进入拖拽指针状态，支持后续拖动
+                isDraggingPointer = true;
                 evt.Use();
             }
             else if (timeArea.Contains(evt.mousePosition))
@@ -666,7 +777,7 @@ public class FinalTimelineEditor : EditorWindow
     }
     #endregion
 
-    #region 动画与特效采样（修复粒子系统采样播放）
+    #region 动画与特效采样
     void SampleAnimation(float timeMs)
     {
         if (targetAnimation == null || currentAnimationClip == null) return;
@@ -681,6 +792,10 @@ public class FinalTimelineEditor : EditorWindow
         targetAnimation.Stop();
     }
 
+    /// <summary>
+    /// 采样全部粒子。规则粒子轨道的时长为A，如果是-1，则是表演总时长。每个粒子预制体包含多个多个粒子系统。当前时刻为B，轨道开始时刻为C。如果当前时刻B需要在轨道的时间区间内。如果粒子系统是持续型的，按照loop的时长为D，（当前时刻B-开始C）%D =(int) E，采样百分比为E/D。如果粒子系统不是持续型的，改粒子持续时长为F，如果B-C >F,不管该粒子，如果小于按照 (B-C)/F，进行采样显示
+    /// </summary>
+    /// <param name="timeMs"></param>
     void SampleAllEffects(float timeMs)
     {
         foreach (var track in effectTracks)
@@ -709,31 +824,21 @@ public class FinalTimelineEditor : EditorWindow
                 }
             }
 
-            float effectStart = track.effect.startTimeMs;
-            float effectEnd = track.effect.durationMs == -1 ? totalTimelineMs : effectStart + track.effect.durationMs;
-            float progress;
+            // 轨道核心参数计算
+            float effectStart = track.effect.startTimeMs; // 轨道开始时刻C（ms）
+                                                          // 轨道总时长A：-1则取表演总时长，否则取配置的durationMs
+            float trackTotalDurationMs = track.effect.durationMs == -1 ? totalTimelineMs - effectStart : track.effect.durationMs;
+            float effectEnd = effectStart + trackTotalDurationMs; // 轨道结束时刻（ms）
 
-            if (timeMs < effectStart)
-            {
-                progress = 0f;
-                track.effect.effectInstance.SetActive(false);
-            }
-            else if (timeMs > effectEnd)
-            {
-                progress = 1f;
-                track.effect.effectInstance.SetActive(false);
-            }
-            else
-            {
-                progress = (timeMs - effectStart) / (effectEnd - effectStart);
-                track.effect.effectInstance.SetActive(true);
-            }
+            bool isInTrackRange = timeMs >= effectStart && timeMs <= effectEnd; // 当前时刻B是否在轨道区间内
+            float trackElapsedTimeMs = timeMs - effectStart; // B - C（ms）
 
-            SampleParticleSystem(track.effect.effectInstance, progress, timeMs >= effectStart && timeMs <= effectEnd, track);
+            track.effect.effectInstance.SetActive(isInTrackRange);
+            SampleParticleSystem(track.effect.effectInstance, trackElapsedTimeMs, isInTrackRange, track);
         }
     }
 
-    void SampleParticleSystem(GameObject effectInstance, float progress, bool isActive, EffectTrack track)
+    void SampleParticleSystem(GameObject effectInstance, float trackElapsedTimeMs, bool isInTrackRange, EffectTrack track)
     {
         if (effectInstance == null) return;
         ParticleSystem[] particleSystems = effectInstance.GetComponentsInChildren<ParticleSystem>(true);
@@ -743,28 +848,64 @@ public class FinalTimelineEditor : EditorWindow
             return;
         }
 
+        // 轨道开始时刻C（ms）、轨道总时长A（ms）
+        float effectStart = track.effect.startTimeMs;
+        float trackTotalDurationMs = track.effect.durationMs == -1 ? totalTimelineMs : track.effect.durationMs;
+
         foreach (var ps in particleSystems)
         {
-            float psDuration = ps.main.duration;
-            if (psDuration <= 0)
-                psDuration = track.effect.durationMs == -1 ? (totalTimelineMs - track.effect.startTimeMs) / 1000f : track.effect.durationMs / 1000f;
-            float sampleTime = psDuration * progress;
+            var main = ps.main;
+            // 粒子系统自身核心参数
+            bool isLoop = main.loop; // 是否循环（持续型）
+            float psSelfDurationSec = main.duration; // 粒子自身时长D/F（秒）
+            float psSelfDurationMs = psSelfDurationSec * 1000; // 转毫秒，方便计算
 
-            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-            ps.Simulate(sampleTime, true, true);
-
-            if (isActive)
+            // 兜底：粒子自身时长为0时，用轨道时长兜底
+            if (psSelfDurationMs <= 0)
             {
-                ps.Play(true);
+                psSelfDurationMs = trackTotalDurationMs;
+                psSelfDurationSec = psSelfDurationMs / 1000;
+            }
+
+            // 仅在轨道时间区间内处理粒子采样
+            if (isInTrackRange)
+            {
+                float sampleTimeSec = 0f;
+                float trackElapsedTimeSec = trackElapsedTimeMs / 1000; // B-C（秒）
+
+                if (isLoop)
+                {
+                    // 循环粒子（持续型）：(B-C) % D = E → 采样百分比E/D
+                    float elapsedModDuration = trackElapsedTimeSec % psSelfDurationSec; // E（秒）
+                    sampleTimeSec = elapsedModDuration; // 采样时间=E
+                }
+                else
+                {
+                    // 非循环粒子：如果B-C > F → 跳过；否则 (B-C)/F 采样
+                    if (trackElapsedTimeSec <= psSelfDurationSec)
+                    {
+                        sampleTimeSec = trackElapsedTimeSec; // 采样时间=B-C
+                    }
+                    else
+                    {
+                        // B-C > F，停止并清空粒子，不处理
+                        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                        continue;
+                    }
+                }
+
+                // 粒子采样核心逻辑
+                ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear); // 先停止并清空
+                ps.Simulate(sampleTimeSec, true, true); // 模拟到采样时间
+                ps.Play(true); // 播放粒子
             }
             else
             {
-                ps.Stop(true);
+                // 不在轨道区间内，停止粒子
+                ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
             }
         }
     }
-
-
     #endregion
 
     #region 音频播放逻辑
