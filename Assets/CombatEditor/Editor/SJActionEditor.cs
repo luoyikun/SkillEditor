@@ -95,7 +95,6 @@ public class SJActionEditor : EditorWindow
     private GameObject targetObject = null;
     private GameObject aniPrefab = null;
 
-
     const string AniPath = "Assets/TLSJ/Models/{0}/{1}/{2}/Animation/anim/";
 
     [MenuItem("Tools/赛季动作编辑器")]
@@ -122,22 +121,7 @@ public class SJActionEditor : EditorWindow
     void OnDisable()
     {
         isPlaying = false;
-        if (targetAnimation != null)
-            targetAnimation.Stop();
-        StopAllAudio();
-
-        foreach (var track in effectTracks)
-        {
-            if (track.effect.effectInstance != null)
-            {
-                DestroyImmediate(track.effect.effectInstance);
-                track.effect.effectInstance = null;
-                track.effect.isParticleInit = false;
-            }
-        }
-
-        if (audioSource != null)
-            DestroyImmediate(audioSource.gameObject);
+        ResetAllMediaState(); // 使用统一的重置方法
 
         // 移除编辑器刷新回调
         EditorApplication.update -= UpdateEditor;
@@ -221,12 +205,8 @@ public class SJActionEditor : EditorWindow
         {
             if (GUILayout.Button("<<", GUILayout.Width(30)))
             {
-                //回到起点
-                currentTimeMs = 0;
-                isPlaying = false;
-                SampleAnimation(0);
-                SampleAllEffects(0);
-                StopAllAudio();
+                // 回到起点并强制重置所有状态
+                ResetToInitialState();
             }
 
             if (isPlaying)
@@ -286,12 +266,9 @@ public class SJActionEditor : EditorWindow
             );
 
             if (newAniObject != aniPrefab)
-            { 
+            {
                 aniPrefab = newAniObject;
             }
-
-            
-
 
             // 检测目标物体是否变更
             if (newTargetObject != targetObject)
@@ -301,8 +278,6 @@ public class SJActionEditor : EditorWindow
                 {
                     targetGameObject = targetObject;
                     targetAnimation = targetGameObject.GetComponent<Animation>();
-                    // 提取目标物体的动画片段并初始化下拉框
-                    //ExtractTargetAnimationClips();
                     // 清空当前选中的动画
                     currentAnimationClip = null;
                     animationDurationMs = 1000;
@@ -325,7 +300,6 @@ public class SJActionEditor : EditorWindow
                 string aniPath = GetAniPathByPrefab();
                 if (aniPath != string.Empty)
                 {
-                    //打开选择动画对话框
                     CustomAnimationClipSelector.ShowByOnePath(aniPath, (selectedClip) =>
                     {
                         if (selectedClip != null)
@@ -341,9 +315,9 @@ public class SJActionEditor : EditorWindow
                                 {
                                     targetAnimation.RemoveClip(animClip);
                                 }
-                                targetAnimation.AddClip(selectedClip, selectedClip.name);  
+                                targetAnimation.AddClip(selectedClip, selectedClip.name);
                             }
-                            
+
                             animationDurationMs = Mathf.RoundToInt(currentAnimationClip.length * 1000);
                             Repaint();
 
@@ -360,14 +334,96 @@ public class SJActionEditor : EditorWindow
                 }
             }
 
-
-           
-
             // 缩放控制
             GUILayout.FlexibleSpace();
             EditorGUILayout.LabelField("缩放:", GUILayout.Width(50));
             timeScale = EditorGUILayout.Slider(timeScale, 0.01f, 1f, GUILayout.Width(200));
             GUILayout.Label($"{timeScale:F3} 像素/ms");
+        }
+    }
+    #endregion
+
+    #region 核心新增：重置方法
+    /// <summary>
+    /// 重置到初始状态（时间归零 + 所有媒体停止）
+    /// </summary>
+    private void ResetToInitialState()
+    {
+        currentTimeMs = 0;
+        isPlaying = false;
+
+        // 1. 重置动画状态
+        if (targetAnimation != null && currentAnimationClip != null)
+        {
+            targetAnimation.Stop();
+            targetAnimation[currentAnimationClip.name].time = 0;
+            targetAnimation.Sample(); // 强制刷新到第一帧
+        }
+
+        // 2. 停止所有音频
+        StopAllAudio();
+
+        // 3. 重置所有特效（粒子）
+        ResetAllEffects();
+
+        Repaint();
+    }
+
+    /// <summary>
+    /// 重置所有特效状态（停止粒子 + 销毁实例）
+    /// </summary>
+    private void ResetAllEffects()
+    {
+        foreach (var track in effectTracks)
+        {
+            track.effect.isParticleInit = false;
+
+            if (track.effect.effectInstance != null)
+            {
+                // 停止所有粒子系统
+                var psList = track.effect.effectInstance.GetComponentsInChildren<ParticleSystem>(true);
+                foreach (var ps in psList)
+                {
+                    ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                    ps.Clear(true); // 清空所有粒子
+                }
+
+                // 隐藏实例（保留实例避免重复创建，也可选择销毁）
+                track.effect.effectInstance.SetActive(false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 重置所有媒体状态（动画+音频+特效）
+    /// </summary>
+    private void ResetAllMediaState()
+    {
+        // 停止动画
+        if (targetAnimation != null)
+            targetAnimation.Stop();
+
+        // 停止音频
+        StopAllAudio();
+
+        // 重置特效
+        ResetAllEffects();
+
+        // 清理音频源
+        if (audioSource != null)
+        {
+            DestroyImmediate(audioSource.gameObject);
+            audioSource = null;
+        }
+
+        // 销毁特效实例
+        foreach (var track in effectTracks)
+        {
+            if (track.effect.effectInstance != null)
+            {
+                DestroyImmediate(track.effect.effectInstance);
+                track.effect.effectInstance = null;
+            }
         }
     }
     #endregion
@@ -509,21 +565,18 @@ public class SJActionEditor : EditorWindow
         EditorGUILayout.Space(10);
         EditorGUILayout.LabelField("轨道信息", EditorStyles.boldLabel);
         EditorGUILayout.BeginVertical("box");
- 
+
         if (selectedEffectTrack != null)
         {
             var effect = selectedEffectTrack.effect;
             EditorGUILayout.LabelField($"轨道名称: {selectedEffectTrack.trackName}");
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField($"  特效ID", GUILayout.Width(50));
-            effect.resID = EditorGUILayout.IntField( effect.resID, GUILayout.Width(150));
+            effect.resID = EditorGUILayout.IntField(effect.resID, GUILayout.Width(150));
             EditorGUILayout.EndHorizontal();
 
             effect.startTimeMs = EditorGUILayout.IntField("开始时间:", effect.startTimeMs);
 
-
-            //EditorGUILayout.LabelField($"特效ID: {effect.resID}");
-            //EditorGUILayout.LabelField($"开始时间: {effect.startTimeMs} ms");
             // 持续时间可编辑，-1也允许输入
             effect.durationMs = EditorGUILayout.IntField("持续时间(ms):", effect.durationMs);
             EditorGUILayout.LabelField($"锚点: {effect.anchorPoint}");
@@ -972,7 +1025,10 @@ public class SJActionEditor : EditorWindow
     void StopAllAudio()
     {
         if (audioSource != null)
+        {
             audioSource.Stop();
+            audioSource.clip = null; // 清空音频片段，避免残留
+        }
     }
     #endregion
 
@@ -984,24 +1040,12 @@ public class SJActionEditor : EditorWindow
         currentTimeMs = Mathf.RoundToInt(currentTimeMs + deltaTime * 1000);
         lastEditorTime = EditorApplication.timeSinceStartup;
 
-        // 播放一次后回到开头并停止
+        // 播放完整个时间轴后，自动重置到初始状态
         if (currentTimeMs >= totalTimelineMs)
         {
-            currentTimeMs = 0;
-            isPlaying = false;
-            // 播放结束后重置所有粒子
-            foreach (var track in effectTracks)
-            {
-                track.effect.isParticleInit = false;
-                if (track.effect.effectInstance != null)
-                {
-                    var psList = track.effect.effectInstance.GetComponentsInChildren<ParticleSystem>(true);
-                    foreach (var ps in psList)
-                    {
-                        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-                    }
-                }
-            }
+            // 核心修改：调用统一的重置方法
+            ResetToInitialState();
+            return; // 提前返回，避免继续执行采样逻辑
         }
 
         SampleAnimation(currentTimeMs);
