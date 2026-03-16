@@ -14,6 +14,14 @@ public class CustomAnimationClipSelector : EditorWindow
     private List<AnimationClip> _filteredClips;
     private AnimationClip _selectedClip;
 
+    public static void ShowByOnePath(string folderPath, System.Action<AnimationClip> callback)
+    {
+        List<string> folderPaths = new List<string>();
+        folderPaths.Add(folderPath);
+        Show(folderPaths, callback);
+    }
+
+
     public static void Show(List<string> folderPaths, System.Action<AnimationClip> callback)
     {
         // 遍历所有指定文件夹（包括子文件夹）获取.anim文件
@@ -27,7 +35,11 @@ public class CustomAnimationClipSelector : EditorWindow
             {
                 assetPath = "Assets/" + assetPath;
             }
-
+            if (!assetPath.EndsWith("/"))
+            {
+                assetPath += "/";
+            }
+            Debug.Log($"文件夹路径{assetPath}");
             // 方法1：使用AssetDatabase.FindAssets查找所有.anim文件
             string[] guids = AssetDatabase.FindAssets("t:AnimationClip", new[] { assetPath });
   
@@ -231,7 +243,7 @@ public class CustomAnimationClipSelector : EditorWindow
 }
 
 // 使用示例
-public class TestSelector : MonoBehaviour
+public class TestSelector : Editor
 {
     [MenuItem("Tools/查找.anim文件")]
     static void FindAnimFiles()

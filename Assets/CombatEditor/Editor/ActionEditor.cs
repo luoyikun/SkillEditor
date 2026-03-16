@@ -3,49 +3,9 @@ using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
 using static UnityEngine.GraphicsBuffer;
-using UnityEditor.VersionControl;
 
-[System.Serializable]
-public class EffectData
-{
-    public string name = "特效";
-    public int startTimeMs = 0;          // 特效开始时间（毫秒）
-    public int durationMs = -1; // 特效时长：-1表示持续到时间轴末尾
-    public GameObject effectPrefab;  // 特效预制体
-    public string anchorPoint = "Root"; // 锚点
-    public int resID = 0;  // 特效资源ID
-    public bool isHidden = false;     // 是否隐藏
 
-    [HideInInspector] public GameObject effectInstance;
-    [HideInInspector] public bool isParticleInit = false; // 新增：标记粒子是否初始化
-}
-
-[System.Serializable]
-public class EffectTrack
-{
-    public string trackName = "特效轨道";
-    public EffectData effect = new EffectData();
-}
-
-[System.Serializable]
-public class AudioData
-{
-    public string name = "音频";
-    public int startTimeMs = 0;          // 音频开始时间（毫秒）
-    public int durationMs = 1000;    // 音频时长（可修改）
-    public AudioClip audioClip;      // 音频片段
-    public bool isHidden = false;    // 是否隐藏
-    public int resID = 0;  // 资源ID
-}
-
-[System.Serializable]
-public class AudioTrack
-{
-    public string trackName = "音频轨道";
-    public AudioData audio = new AudioData();
-}
-
-public class SJActionEditor : EditorWindow
+public class ActionEditor : EditorWindow
 {
     // 核心时间数据：分离动画时长和总表现时间
     private int totalTimelineMs = 1000;  // 整体表现时间（可自定义）
@@ -95,14 +55,16 @@ public class SJActionEditor : EditorWindow
     private GameObject targetObject = null;
     private GameObject aniPrefab = null;
 
+    // 存储目标物体的动画片段（用于下拉选择）
+    private List<AnimationClip> targetAnimClips = new List<AnimationClip>();
+    private string[] animClipNames; // 动画片段名称数组（用于下拉框）
+    private int selectedAnimIndex = -1; // 当前选中的动画索引
 
-    const string AniPath = "Assets/TLSJ/Models/{0}/{1}/{2}/Animation/anim/";
-
-    [MenuItem("Tools/赛季动作编辑器")]
+    [MenuItem("Tools/动作编辑器")]
     static void OpenWindow()
     {
-        var window = GetWindow<SJActionEditor>();
-        window.titleContent = new GUIContent("赛季动作编辑器");
+        var window = GetWindow<ActionEditor>();
+        window.titleContent = new GUIContent("动作编辑器");
         window.minSize = new Vector2(800, 400);
         window.Show();
     }
@@ -221,7 +183,6 @@ public class SJActionEditor : EditorWindow
         {
             if (GUILayout.Button("<<", GUILayout.Width(30)))
             {
-                //回到起点
                 currentTimeMs = 0;
                 isPlaying = false;
                 SampleAnimation(0);
@@ -286,11 +247,14 @@ public class SJActionEditor : EditorWindow
             );
 
             if (newAniObject != aniPrefab)
-            { 
+            {
                 aniPrefab = newAniObject;
             }
 
-            
+            //选择动画预制体后，找动画资源的路径
+            string aniPrefabPath = AssetDatabase.GetAssetPath(aniPrefab);
+
+
 
 
             // 检测目标物体是否变更
@@ -302,66 +266,48 @@ public class SJActionEditor : EditorWindow
                     targetGameObject = targetObject;
                     targetAnimation = targetGameObject.GetComponent<Animation>();
                     // 提取目标物体的动画片段并初始化下拉框
-                    //ExtractTargetAnimationClips();
+                    ExtractTargetAnimationClips();
                     // 清空当前选中的动画
                     currentAnimationClip = null;
                     animationDurationMs = 1000;
+                    selectedAnimIndex = -1;
                 }
                 else
                 {
                     targetAnimation = null;
                     currentAnimationClip = null;
                     animationDurationMs = 1000;
+                    targetAnimClips.Clear();
+                    animClipNames = new string[0];
+                    selectedAnimIndex = -1;
                 }
             }
 
-            if (GUILayout.Button("选择动画", EditorStyles.miniButton, GUILayout.Width(80)))
+            // 动画选择下拉框（全版本兼容方案）
+            GUILayout.Label("选择动画:", GUILayout.Width(70));
+            if (targetAnimClips.Count > 0)
             {
-                if (targetGameObject == null || targetAnimation == null)
-                {
-                    Debug.LogWarning("还没选择场景中物体");
-                    return;
-                }
-                string aniPath = GetAniPathByPrefab();
-                if (aniPath != string.Empty)
-                {
-                    //打开选择动画对话框
-                    CustomAnimationClipSelector.ShowByOnePath(aniPath, (selectedClip) =>
-                    {
-                        if (selectedClip != null)
-                        {
-                            Debug.Log($"选择了: {selectedClip.name}");
-                            Debug.Log($"路径: {AssetDatabase.GetAssetPath(selectedClip)}");
+                // 绘制下拉选择框
+                int newSelectedIndex = EditorGUILayout.Popup(
+                    selectedAnimIndex,
+                    animClipNames,
+                    GUILayout.Width(150)
+                );
 
-                            currentAnimationClip = selectedClip;
-                            AnimationClip animClip = targetAnimation.GetClip(selectedClip.name);
-                            if (animClip != selectedClip)
-                            {
-                                if (animClip != null)
-                                {
-                                    targetAnimation.RemoveClip(animClip);
-                                }
-                                targetAnimation.AddClip(selectedClip, selectedClip.name);  
-                            }
-                            
-                            animationDurationMs = Mathf.RoundToInt(currentAnimationClip.length * 1000);
-                            Repaint();
-
-                        }
-                        else
-                        {
-                            Debug.Log("选择了: None");
-                        }
-                    });
-                }
-                else
+                // 检测选择变更
+                if (newSelectedIndex != selectedAnimIndex && newSelectedIndex >= 0 && newSelectedIndex < targetAnimClips.Count)
                 {
-                    Debug.LogWarning("没有动画预制体");
+                    selectedAnimIndex = newSelectedIndex;
+                    currentAnimationClip = targetAnimClips[selectedAnimIndex];
+                    animationDurationMs = Mathf.RoundToInt(currentAnimationClip.length * 1000);
+                    Repaint();
                 }
             }
-
-
-           
+            else
+            {
+                // 无动画时显示提示
+                EditorGUILayout.LabelField("无可用动画", GUILayout.Width(150));
+            }
 
             // 缩放控制
             GUILayout.FlexibleSpace();
@@ -372,21 +318,38 @@ public class SJActionEditor : EditorWindow
     }
     #endregion
 
-    string GetAniPathByPrefab()
+    #region 提取目标物体的动画片段并初始化下拉框
+    private void ExtractTargetAnimationClips()
     {
-        if (aniPrefab != null)
+        targetAnimClips.Clear();
+
+        if (targetAnimation == null)
         {
-            string aniPrefabPath = AssetDatabase.GetAssetPath(aniPrefab);
-            string[] paramArray = aniPrefabPath.Split('/');
-            if (paramArray.Length >= 4)
+            animClipNames = new string[0];
+            return;
+        }
+
+        // 提取目标物体Animation组件中的所有动画片段
+        foreach (AnimationState state in targetAnimation)
+        {
+            if (state.clip != null && !targetAnimClips.Contains(state.clip))
             {
-                string aniPath = string.Format(AniPath, paramArray[paramArray.Length - 4], paramArray[paramArray.Length - 3], paramArray[paramArray.Length - 2]);
-                Debug.Log($"动画文件夹{aniPath}");
-                return aniPath;
+                targetAnimClips.Add(state.clip);
             }
         }
-        return string.Empty;
+
+        // 初始化下拉框名称数组
+        if (targetAnimClips.Count > 0)
+        {
+            animClipNames = targetAnimClips.Select(clip => clip.name).ToArray();
+        }
+        else
+        {
+            animClipNames = new string[0];
+            EditorUtility.DisplayDialog("提示", "该物体的Animation组件中未找到任何动画片段！", "确定");
+        }
     }
+    #endregion
 
     #region 轨道绘制
     void DrawSingleEffectTrackWithOps(EffectTrack track, int index)
@@ -507,23 +470,28 @@ public class SJActionEditor : EditorWindow
     void DrawBottomInfoPanel()
     {
         EditorGUILayout.Space(10);
-        EditorGUILayout.LabelField("轨道信息", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("详细信息", EditorStyles.boldLabel);
         EditorGUILayout.BeginVertical("box");
- 
+
+        // 显示当前选中的动画信息
+        if (currentAnimationClip != null)
+        {
+            EditorGUILayout.LabelField($"当前动画: {currentAnimationClip.name}");
+            EditorGUILayout.LabelField($"动画时长: {animationDurationMs} ms");
+            EditorGUILayout.Separator();
+        }
+        else
+        {
+            EditorGUILayout.LabelField("未选择动画片段，请从下拉框选择", EditorStyles.miniLabel);
+            EditorGUILayout.Separator();
+        }
+
         if (selectedEffectTrack != null)
         {
             var effect = selectedEffectTrack.effect;
             EditorGUILayout.LabelField($"轨道名称: {selectedEffectTrack.trackName}");
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField($"  特效ID", GUILayout.Width(50));
-            effect.resID = EditorGUILayout.IntField( effect.resID, GUILayout.Width(150));
-            EditorGUILayout.EndHorizontal();
-
-            effect.startTimeMs = EditorGUILayout.IntField("开始时间:", effect.startTimeMs);
-
-
-            //EditorGUILayout.LabelField($"特效ID: {effect.resID}");
-            //EditorGUILayout.LabelField($"开始时间: {effect.startTimeMs} ms");
+            EditorGUILayout.LabelField($"特效ID: {effect.resID}");
+            EditorGUILayout.LabelField($"开始时间: {effect.startTimeMs} ms");
             // 持续时间可编辑，-1也允许输入
             effect.durationMs = EditorGUILayout.IntField("持续时间(ms):", effect.durationMs);
             EditorGUILayout.LabelField($"锚点: {effect.anchorPoint}");
@@ -585,21 +553,8 @@ public class SJActionEditor : EditorWindow
         EditorGUI.DrawRect(trackRect, new Color(0.2f, 0.2f, 0.2f, 0.8f));
 
         // 显示当前选中的动画名称
-        if (currentAnimationClip != null)
-        {
-            Rect position = new Rect(0, y - 10, labelWidth, 20);
-            currentAnimationClip = (AnimationClip)EditorGUI.ObjectField(
-                position,
-                currentAnimationClip,
-                typeof(AnimationClip),
-                false
-            );
-        }
-        else
-        {
-            string animName = currentAnimationClip != null ? currentAnimationClip.name : "未选择动画";
-            GUI.Label(new Rect(0, y - 10, labelWidth, trackHeight), $"动画: {animName}");
-        }
+        string animName = currentAnimationClip != null ? currentAnimationClip.name : "未选择动画";
+        GUI.Label(new Rect(0, y - 10, labelWidth, trackHeight), $"动画: {animName}");
 
         // 动画时长显示：左侧可复制不可编辑文本框
         GUILayout.BeginArea(new Rect(0, y + 10, labelWidth, trackHeight));
