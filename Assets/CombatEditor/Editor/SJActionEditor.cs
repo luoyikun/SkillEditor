@@ -43,6 +43,7 @@ public class AudioTrack
 {
     public string trackName = "音频轨道";
     public AudioData audio = new AudioData();
+    public bool isPlaying = false; //是否已经播放了，播放了不要管，不然一直重叠播放
 }
 
 public class SJActionEditor : EditorWindow

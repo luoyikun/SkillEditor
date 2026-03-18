@@ -894,6 +894,11 @@ public class ActionEditor : EditorWindow
     #region 音频播放逻辑
     void UpdateAudioPlayback(float timeMs)
     {
+        if (isPlaying == false)
+        {
+            //运行时采样
+            return;
+        }
         if (audioSource == null)
         {
             GameObject go = new GameObject("TimelineAudioSource");
@@ -909,17 +914,24 @@ public class ActionEditor : EditorWindow
 
             if (timeMs >= audioStart && timeMs < audioEnd)
             {
-                if (!audioSource.isPlaying || audioSource.clip != track.audio.audioClip)
+                if (track.isPlaying == false)
                 {
-                    audioSource.clip = track.audio.audioClip;
-                    audioSource.time = (timeMs - audioStart) / 1000f;
-                    audioSource.Play();
+                    EditorAudio.PlayClip(track.audio.audioClip, 0, false);
+                    track.isPlaying = true;
                 }
+                //if (!audioSource.isPlaying || audioSource.clip != track.audio.audioClip)
+                //{
+                //    EditorAudio.PlayClip(track.audio.audioClip,0,false);
+                //    //audioSource.clip = track.audio.audioClip;
+                //    //audioSource.time = (timeMs - audioStart) / 1000f;
+                //    //audioSource.Play();
+                //}
             }
             else
             {
-                if (audioSource.clip == track.audio.audioClip && audioSource.isPlaying)
-                    audioSource.Stop();
+                track.isPlaying = false;
+                //if (audioSource.clip == track.audio.audioClip && audioSource.isPlaying)
+                //    audioSource.Stop();
             }
         }
     }
@@ -928,6 +940,11 @@ public class ActionEditor : EditorWindow
     {
         if (audioSource != null)
             audioSource.Stop();
+
+        for (int i = 0; i < audioTracks.Count; i++)
+        {
+            audioTracks[i].isPlaying = false;
+        }
     }
     #endregion
 
