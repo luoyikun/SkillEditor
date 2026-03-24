@@ -8,11 +8,11 @@ namespace Amanda.EditorTable
 {
     /**
      * 自动生成的配置表类：Chapter
-     * 生成时间：2026-03-18 21:44:24
+     * 生成时间：2026-03-23 22:38:24
      * 请勿手动修改！
      */
     [Serializable]
-    public class Chapter
+    public class Chapter : IEditorTable
     {
         /**
          * #ID
@@ -42,12 +42,15 @@ namespace Amanda.EditorTable
         /**
          * 章节奖励1
          */
-        public int[] ChapterAward = new int[9];
+        public const int ChapterAwardMaxLength = 9;
+        public int[] ChapterAward = new int[ChapterAwardMaxLength];
 
         /**
          * 转换为配置表行文本（\t分隔）
          * 统一调用ConvertValue方法处理所有类型值转换
          * 空List（null/Count=0）→""
+         * 数组输出按常量最大长度循环，不足补空串
+         * 实现IEditorTable接口的核心方法
          */
         public string ToDataLine()
         {
@@ -69,15 +72,18 @@ namespace Amanda.EditorTable
             columnValues.Add(TableToClassGenerator.ConvertValue(Picture));
 
             // ChapterAward
-            columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[0]));
-            columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[1]));
-            columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[2]));
-            columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[3]));
-            columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[4]));
-            columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[5]));
-            columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[6]));
-            columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[7]));
-            columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[8]));
+            int maxLen = ChapterAwardMaxLength;
+            for (int i = 0; i < maxLen; i++)
+            {
+                if (ChapterAward != null && i < ChapterAward.Length)
+                {
+                    columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[i]));
+                }
+                else
+                {
+                    columnValues.Add(string.Empty);
+                }
+            }
 
             return string.Join("\t", columnValues);
         }
