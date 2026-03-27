@@ -87,6 +87,11 @@ namespace Amanda.EditorTable
 
             return string.Join("\t", columnValues);
         }
+
+        public void LoadLine(string sLine)
+        {
+            throw new NotImplementedException();
+        }
     }
 }
 

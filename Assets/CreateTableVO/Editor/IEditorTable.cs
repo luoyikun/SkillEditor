@@ -14,6 +14,8 @@ namespace Amanda.EditorTable
         /// </summary>
         /// <returns>制表符分隔的字符串</returns>
         string ToDataLine();
+        //配置表的一行转为内容
+        void LoadLine(string sLine);
     }
 }
 #endif
