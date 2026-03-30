@@ -8,7 +8,7 @@ namespace Amanda.EditorTable
 {
     /**
      * 自动生成的配置表类：Chapter
-     * 生成时间：2026-03-23 22:38:24
+     * 生成时间：2026-03-28 21:29:50
      * 请勿手动修改！
      */
     [Serializable]
@@ -30,6 +30,11 @@ namespace Amanda.EditorTable
         public int Name;
 
         /**
+         * 声音列表
+         */
+        public List<int> Sound = new List<int>();
+
+        /**
          * 章节包装
          */
         public int Desc;
@@ -43,56 +48,137 @@ namespace Amanda.EditorTable
          * 章节奖励1
          */
         public const int ChapterAwardMaxLength = 9;
-        public int[] ChapterAward = new int[ChapterAwardMaxLength];
+        public int[] ChapterAward;
 
         /**
-         * 转换为配置表行文本（\t分隔）
-         * 统一调用ConvertValue方法处理所有类型值转换
-         * 空List（null/Count=0）→""
-         * 数组输出按常量最大长度循环，不足补空串
-         * 实现IEditorTable接口的核心方法
+         * 声音延迟
          */
+        public List<int> SoundDelay = new List<int>();
+
         public string ToDataLine()
         {
             List<string> columnValues = new List<string>();
 
-            // ID
             columnValues.Add(TableToClassGenerator.ConvertValue(ID));
 
-            // ChapterOrder
             columnValues.Add(TableToClassGenerator.ConvertValue(ChapterOrder));
 
-            // Name
             columnValues.Add(TableToClassGenerator.ConvertValue(Name));
 
-            // Desc
+            if (Sound != null && Sound.Count > 0)
+            {
+                List<string> tmp = new List<string>();
+                foreach (var v in Sound) tmp.Add(TableToClassGenerator.ConvertValue(v));
+                columnValues.Add(string.Join("|", tmp));
+            }
+            else columnValues.Add(string.Empty);
+
             columnValues.Add(TableToClassGenerator.ConvertValue(Desc));
 
-            // Picture
             columnValues.Add(TableToClassGenerator.ConvertValue(Picture));
 
-            // ChapterAward
             int maxLen = ChapterAwardMaxLength;
             for (int i = 0; i < maxLen; i++)
             {
                 if (ChapterAward != null && i < ChapterAward.Length)
-                {
                     columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[i]));
-                }
                 else
-                {
                     columnValues.Add(string.Empty);
-                }
             }
+
+            if (SoundDelay != null && SoundDelay.Count > 0)
+            {
+                List<string> tmp = new List<string>();
+                foreach (var v in SoundDelay) tmp.Add(TableToClassGenerator.ConvertValue(v));
+                columnValues.Add(string.Join("|", tmp));
+            }
+            else columnValues.Add(string.Empty);
 
             return string.Join("\t", columnValues);
         }
 
         public void LoadLine(string sLine)
         {
-            throw new NotImplementedException();
+            if (string.IsNullOrEmpty(sLine)) return;
+            string[] cells = sLine.Split('\t');
+            int index = 0;
+
+            // ID
+            if (index < cells.Length)
+                ID = int.TryParse(cells[index++], out var val) ? val : 0;
+            else
+                ID = default;
+
+            // ChapterOrder
+            if (index < cells.Length)
+                ChapterOrder = int.TryParse(cells[index++], out var val) ? val : 0;
+            else
+                ChapterOrder = default;
+
+            // Name
+            if (index < cells.Length)
+                Name = int.TryParse(cells[index++], out var val) ? val : 0;
+            else
+                Name = default;
+
+            // Sound 列表（每次加载清空重建）
+            Sound = new List<int>();
+            if (index < cells.Length && !string.IsNullOrEmpty(cells[index]))
+            {
+                string[] parts = cells[index++].Split('|');
+                foreach (var p in parts)
+                {
+                    Sound.Add(int.TryParse(p.Trim(), out var val) ? val : 0);
+                }
+            }
+            else index++;
+
+            // Desc
+            if (index < cells.Length)
+                Desc = int.TryParse(cells[index++], out var val) ? val : 0;
+            else
+                Desc = default;
+
+            // Picture
+            if (index < cells.Length)
+                Picture = int.TryParse(cells[index++], out var val) ? val : 0;
+            else
+                Picture = default;
+
+            // ChapterAward 动态数组（自动统计非空）
+            int validCount_ChapterAward = 0;
+            int startIndex_ChapterAward = index;
+
+            for (int i = 0; i < ChapterAwardMaxLength && index < cells.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(cells[index]))
+                    validCount_ChapterAward++;
+                index++;
+            }
+
+            ChapterAward = new int[validCount_ChapterAward];
+            index = startIndex_ChapterAward;
+
+            for (int i = 0; i < validCount_ChapterAward && index < cells.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(cells[index]))
+                    ChapterAward[i] = int.TryParse(cells[index], out var val) ? val : 0;
+                index++;
+            }
+
+            // SoundDelay 列表（每次加载清空重建）
+            SoundDelay = new List<int>();
+            if (index < cells.Length && !string.IsNullOrEmpty(cells[index]))
+            {
+                string[] parts = cells[index++].Split('|');
+                foreach (var p in parts)
+                {
+                    SoundDelay.Add(int.TryParse(p.Trim(), out var val) ? val : 0);
+                }
+            }
+            else index++;
+
         }
     }
 }
-
 #endif

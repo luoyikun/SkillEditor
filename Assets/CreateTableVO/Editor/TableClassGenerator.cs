@@ -3,6 +3,8 @@
  * 功能：表格转编辑器表格类结构
  * 作者：罗翊坤
  * 时间：2026/3/19 周四
+ * 优化：LoadLine 中 List 自动重新 new，确保每次加载清空旧数据
+ * 优化：生成 partial 局部类，支持扩展
 *******************************************************************/
 using System;
 using System.IO;
@@ -270,41 +272,32 @@ namespace Amanda.EditorTable
             return string.IsNullOrEmpty(sanitizedName) ? "UnnamedField" : sanitizedName;
         }
 
-   
-        /// <summary>
-        /// 拼接C#类代码（实现IEditorTable接口）
-        /// 1. 为数组字段生成 MaxLength 常量，并用于数组初始化。
-        /// 2. ToDataLine中数组输出按常量长度循环，不足补空串。
-        /// </summary>
+
+        #region 自动生成类代码（含LoadLine，数组动态长度）
         private static string BuildClassCode(string className, List<FieldInfo> fieldInfos)
         {
             StringBuilder codeBuilder = new StringBuilder();
 
-            // 1. 宏包裹
             codeBuilder.AppendLine("#if UNITY_EDITOR");
             codeBuilder.AppendLine();
-
-            // 2. 引用命名空间
             codeBuilder.AppendLine("using System;");
             codeBuilder.AppendLine("using System.Collections.Generic;");
             codeBuilder.AppendLine("using UnityEngine;");
             codeBuilder.AppendLine();
-
-            // 3. 命名空间
             codeBuilder.AppendLine("namespace Amanda.EditorTable");
             codeBuilder.AppendLine("{");
 
-            // 4. 类定义（实现IEditorTable接口）
             codeBuilder.AppendLine("    /**");
             codeBuilder.AppendLine($"     * 自动生成的配置表类：{className}");
             codeBuilder.AppendLine($"     * 生成时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             codeBuilder.AppendLine("     * 请勿手动修改！");
             codeBuilder.AppendLine("     */");
             codeBuilder.AppendLine("    [Serializable]");
-            codeBuilder.AppendLine($"    public class {className} : IEditorTable");
+            // 👇 这里加了 partial
+            codeBuilder.AppendLine($"    public partial class {className} : IEditorTable");
             codeBuilder.AppendLine("    {");
 
-            // 5. 生成字段（先为数组字段生成常量，再生成数组本身）
+            // 生成字段
             foreach (var fieldInfo in fieldInfos)
             {
                 if (string.IsNullOrWhiteSpace(fieldInfo.FieldName)) continue;
@@ -315,11 +308,9 @@ namespace Amanda.EditorTable
 
                 if (fieldInfo.IsArray)
                 {
-                    // 生成数组最大长度常量
                     string constName = $"{fieldInfo.FieldName}MaxLength";
                     codeBuilder.AppendLine($"        public const int {constName} = {fieldInfo.ArrayLength};");
-                    // 数组字段初始化使用该常量
-                    codeBuilder.AppendLine($"        public {fieldInfo.BaseType}[] {fieldInfo.FieldName} = new {fieldInfo.BaseType}[{constName}];");
+                    codeBuilder.AppendLine($"        public {fieldInfo.BaseType}[] {fieldInfo.FieldName};");
                 }
                 else if (fieldInfo.IsList)
                 {
@@ -332,63 +323,40 @@ namespace Amanda.EditorTable
                 codeBuilder.AppendLine();
             }
 
-            // 6. ToDataLine方法（接口实现）
-            codeBuilder.AppendLine("        /**");
-            codeBuilder.AppendLine("         * 转换为配置表行文本（\\t分隔）");
-            codeBuilder.AppendLine("         * 统一调用ConvertValue方法处理所有类型值转换");
-            codeBuilder.AppendLine("         * 空List（null/Count=0）→\"\"");
-            codeBuilder.AppendLine("         * 数组输出按常量最大长度循环，不足补空串");
-            codeBuilder.AppendLine("         * 实现IEditorTable接口的核心方法");
-            codeBuilder.AppendLine("         */");
+            // ====================== ToDataLine ======================
             codeBuilder.AppendLine("        public string ToDataLine()");
             codeBuilder.AppendLine("        {");
             codeBuilder.AppendLine("            List<string> columnValues = new List<string>();");
             codeBuilder.AppendLine();
 
-            // 拼接字段值
             foreach (var fieldInfo in fieldInfos)
             {
                 if (string.IsNullOrWhiteSpace(fieldInfo.FieldName)) continue;
 
-                codeBuilder.AppendLine($"            // {fieldInfo.FieldName}");
-
                 if (fieldInfo.IsArray)
                 {
-                    // 数组：按常量最大长度循环，不足补空串
                     string constName = $"{fieldInfo.FieldName}MaxLength";
                     codeBuilder.AppendLine($"            int maxLen = {constName};");
                     codeBuilder.AppendLine($"            for (int i = 0; i < maxLen; i++)");
                     codeBuilder.AppendLine("            {");
                     codeBuilder.AppendLine($"                if ({fieldInfo.FieldName} != null && i < {fieldInfo.FieldName}.Length)");
-                    codeBuilder.AppendLine("                {");
                     codeBuilder.AppendLine($"                    columnValues.Add(TableToClassGenerator.ConvertValue({fieldInfo.FieldName}[i]));");
-                    codeBuilder.AppendLine("                }");
                     codeBuilder.AppendLine("                else");
-                    codeBuilder.AppendLine("                {");
                     codeBuilder.AppendLine("                    columnValues.Add(string.Empty);");
-                    codeBuilder.AppendLine("                }");
                     codeBuilder.AppendLine("            }");
                 }
                 else if (fieldInfo.IsList)
                 {
-                    // List：空List返回""，非空则用|分隔
                     codeBuilder.AppendLine($"            if ({fieldInfo.FieldName} != null && {fieldInfo.FieldName}.Count > 0)");
                     codeBuilder.AppendLine("            {");
-                    codeBuilder.AppendLine("                List<string> valList = new List<string>();");
-                    codeBuilder.AppendLine($"                foreach (var val in {fieldInfo.FieldName})");
-                    codeBuilder.AppendLine("                {");
-                    codeBuilder.AppendLine("                    valList.Add(TableToClassGenerator.ConvertValue(val));");
-                    codeBuilder.AppendLine("                }");
-                    codeBuilder.AppendLine("                columnValues.Add(string.Join(\"|\", valList));");
+                    codeBuilder.AppendLine("                List<string> tmp = new List<string>();");
+                    codeBuilder.AppendLine($"                foreach (var v in {fieldInfo.FieldName}) tmp.Add(TableToClassGenerator.ConvertValue(v));");
+                    codeBuilder.AppendLine("                columnValues.Add(string.Join(\"|\", tmp));");
                     codeBuilder.AppendLine("            }");
-                    codeBuilder.AppendLine("            else");
-                    codeBuilder.AppendLine("            {");
-                    codeBuilder.AppendLine("                columnValues.Add(string.Empty);");
-                    codeBuilder.AppendLine("            }");
+                    codeBuilder.AppendLine("            else columnValues.Add(string.Empty);");
                 }
                 else
                 {
-                    // 普通字段：直接调用ConvertValue
                     codeBuilder.AppendLine($"            columnValues.Add(TableToClassGenerator.ConvertValue({fieldInfo.FieldName}));");
                 }
                 codeBuilder.AppendLine();
@@ -396,15 +364,107 @@ namespace Amanda.EditorTable
 
             codeBuilder.AppendLine("            return string.Join(\"\\t\", columnValues);");
             codeBuilder.AppendLine("        }");
+            codeBuilder.AppendLine();
 
-            // 7. 闭合类、命名空间、宏
+            // ====================== LoadLine 核心实现 ======================
+            codeBuilder.AppendLine("        public void LoadLine(string sLine)");
+            codeBuilder.AppendLine("        {");
+            codeBuilder.AppendLine("            if (string.IsNullOrEmpty(sLine)) return;");
+            codeBuilder.AppendLine("            string[] cells = sLine.Split('\\t');");
+            codeBuilder.AppendLine("            int index = 0;");
+            codeBuilder.AppendLine();
+
+            foreach (var field in fieldInfos)
+            {
+                if (string.IsNullOrWhiteSpace(field.FieldName)) continue;
+
+                if (field.IsArray)
+                {
+                    string type = field.BaseType;
+                    string arrName = field.FieldName;
+                    string maxConst = $"{arrName}MaxLength";
+
+                    codeBuilder.AppendLine($"            // {arrName} 动态数组（自动统计非空）");
+                    codeBuilder.AppendLine($"            int validCount_{arrName} = 0;");
+                    codeBuilder.AppendLine($"            int startIndex_{arrName} = index;");
+                    codeBuilder.AppendLine();
+
+                    // 统计有效数量
+                    codeBuilder.AppendLine($"            for (int i = 0; i < {maxConst} && index < cells.Length; i++)");
+                    codeBuilder.AppendLine("            {");
+                    codeBuilder.AppendLine("                if (!string.IsNullOrEmpty(cells[index]))");
+                    codeBuilder.AppendLine($"                    validCount_{arrName}++;");
+                    codeBuilder.AppendLine("                index++;");
+                    codeBuilder.AppendLine("            }");
+                    codeBuilder.AppendLine();
+
+                    // 创建数组
+                    codeBuilder.AppendLine($"            {arrName} = new {type}[validCount_{arrName}];");
+                    codeBuilder.AppendLine($"            index = startIndex_{arrName};");
+                    codeBuilder.AppendLine();
+
+                    // 赋值
+                    codeBuilder.AppendLine($"            for (int i = 0; i < validCount_{arrName} && index < cells.Length; i++)");
+                    codeBuilder.AppendLine("            {");
+                    codeBuilder.AppendLine("                if (!string.IsNullOrEmpty(cells[index]))");
+                    codeBuilder.AppendLine($"                    {arrName}[i] = {GetParseCode(type, "cells[index]")};");
+                    codeBuilder.AppendLine("                index++;");
+                    codeBuilder.AppendLine("            }");
+                }
+                else if (field.IsList)
+                {
+                    string type = field.BaseType;
+                    string listName = field.FieldName;
+
+                    codeBuilder.AppendLine($"            // {listName} 列表（每次加载清空重建）");
+                    codeBuilder.AppendLine($"            {listName} = new List<{type}>();");
+
+                    codeBuilder.AppendLine("            if (index < cells.Length && !string.IsNullOrEmpty(cells[index]))");
+                    codeBuilder.AppendLine("            {");
+                    codeBuilder.AppendLine("                string[] parts = cells[index++].Split('|');");
+                    codeBuilder.AppendLine("                foreach (var p in parts)");
+                    codeBuilder.AppendLine("                {");
+                    codeBuilder.AppendLine($"                    {listName}.Add({GetParseCode(type, "p.Trim()")});");
+                    codeBuilder.AppendLine("                }");
+                    codeBuilder.AppendLine("            }");
+                    codeBuilder.AppendLine("            else index++;");
+                }
+                else
+                {
+                    string type = field.BaseType;
+                    string name = field.FieldName;
+
+                    codeBuilder.AppendLine($"            // {name}");
+                    codeBuilder.AppendLine("            if (index < cells.Length)");
+                    codeBuilder.AppendLine($"                {name} = {GetParseCode(type, "cells[index++]")};");
+                    codeBuilder.AppendLine("            else");
+                    codeBuilder.AppendLine($"                {name} = default;");
+                }
+
+                codeBuilder.AppendLine();
+            }
+
+            codeBuilder.AppendLine("        }");
             codeBuilder.AppendLine("    }");
             codeBuilder.AppendLine("}");
-            codeBuilder.AppendLine();
             codeBuilder.AppendLine("#endif");
 
             return codeBuilder.ToString();
         }
+
+        private static string GetParseCode(string type, string valueExpr)
+        {
+            return type switch
+            {
+                "int" => $"int.TryParse({valueExpr}, out var val) ? val : 0",
+                "float" => $"float.TryParse({valueExpr}, out var val) ? val : 0f",
+                "bool" => $"bool.TryParse({valueExpr}, out var val) ? val : false",
+                "string" => valueExpr,
+                _ => valueExpr
+            };
+        }
+        #endregion
+
         #endregion
     }
 }

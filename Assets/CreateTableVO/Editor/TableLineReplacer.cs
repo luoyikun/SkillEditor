@@ -10,12 +10,25 @@ namespace Amanda.EditorTable
 {
     public class TableLineReplacer
     {
-        [MenuItem("Tools/TestActionSkillConfigTableLineReplacer")]
+        //[MenuItem("Tools/TestActionSkillConfigTableLineReplacer")]
+        //public static void ReplaceLineAndCopy()
+        //{
+        //    ActionSkillConfig actionSkillConfig = new ActionSkillConfig();
+        //    actionSkillConfig.ID = 26200011;
+        //    ReplaceLineAndCopy(actionSkillConfig.ID, actionSkillConfig, Application.dataPath + "/CreateTableVO/Table/ActionSkillConfigTable.txt");
+        //}
+
+
+        [MenuItem("Tools/LoadChapter")]
         public static void ReplaceLineAndCopy()
         {
-            ActionSkillConfig actionSkillConfig = new ActionSkillConfig();
-            actionSkillConfig.ID = 26200011;
-            ReplaceLineAndCopy(actionSkillConfig.ID, actionSkillConfig, Application.dataPath + "/CreateTableVO/Table/ActionSkillConfigTable.txt");
+            EditorTableMgr<Chapter>.Load();
+
+            bool ret = EditorTableMgr<Chapter>.Get(10001,out Chapter data);
+            if (ret)
+            {
+                Debug.Log(data.ChapterAward[0]);
+            }
         }
 
         public static void ReplaceLineAndCopy(int id, IEditorTable table, string path)
