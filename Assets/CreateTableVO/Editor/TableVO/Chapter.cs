@@ -8,11 +8,11 @@ namespace Amanda.EditorTable
 {
     /**
      * 自动生成的配置表类：Chapter
-     * 生成时间：2026-03-28 21:29:50
+     * 生成时间：2026-04-02 16:58:54
      * 请勿手动修改！
      */
     [Serializable]
-    public class Chapter : IEditorTable
+    public partial class Chapter : IEditorTable
     {
         /**
          * #ID
@@ -61,9 +61,9 @@ namespace Amanda.EditorTable
 
             columnValues.Add(TableToClassGenerator.ConvertValue(ID));
 
-            columnValues.Add(TableToClassGenerator.ConvertValue(ChapterOrder));
+            columnValues.Add(TableToClassGenerator.IsDefaultValue(ChapterOrder) ? string.Empty : TableToClassGenerator.ConvertValue(ChapterOrder));
 
-            columnValues.Add(TableToClassGenerator.ConvertValue(Name));
+            columnValues.Add(TableToClassGenerator.IsDefaultValue(Name) ? string.Empty : TableToClassGenerator.ConvertValue(Name));
 
             if (Sound != null && Sound.Count > 0)
             {
@@ -73,12 +73,11 @@ namespace Amanda.EditorTable
             }
             else columnValues.Add(string.Empty);
 
-            columnValues.Add(TableToClassGenerator.ConvertValue(Desc));
+            columnValues.Add(TableToClassGenerator.IsDefaultValue(Desc) ? string.Empty : TableToClassGenerator.ConvertValue(Desc));
 
-            columnValues.Add(TableToClassGenerator.ConvertValue(Picture));
+            columnValues.Add(TableToClassGenerator.IsDefaultValue(Picture) ? string.Empty : TableToClassGenerator.ConvertValue(Picture));
 
-            int maxLen = ChapterAwardMaxLength;
-            for (int i = 0; i < maxLen; i++)
+            for (int i = 0; i < ChapterAwardMaxLength; i++)
             {
                 if (ChapterAward != null && i < ChapterAward.Length)
                     columnValues.Add(TableToClassGenerator.ConvertValue(ChapterAward[i]));

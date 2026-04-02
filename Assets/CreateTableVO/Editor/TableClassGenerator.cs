@@ -12,6 +12,7 @@ using System.Text;
 using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
+
 namespace Amanda.EditorTable
 {
     /// <summary>
@@ -96,6 +97,28 @@ namespace Amanda.EditorTable
                 return false;
             }
         }
+
+        #region 判断默认值（供ToDataLine使用）
+        public static bool IsDefaultValue<T>(T value)
+        {
+            if (value == null)
+                return true;
+
+            Type type = typeof(T);
+            if (type == typeof(int))
+                return (int)(object)value == 0;
+            if (type == typeof(float))
+                return Math.Abs((float)(object)value) < 0.000001f;
+            if (type == typeof(double))
+                return Math.Abs((double)(object)value) < 0.000001d;
+            if (type == typeof(bool))
+                return (bool)(object)value == false;
+            if (type == typeof(string))
+                return string.IsNullOrEmpty((string)(object)value);
+
+            return false;
+        }
+        #endregion
 
         #region 唯一值转换方法（整合float格式化逻辑）
         /// <summary>
@@ -272,7 +295,6 @@ namespace Amanda.EditorTable
             return string.IsNullOrEmpty(sanitizedName) ? "UnnamedField" : sanitizedName;
         }
 
-
         #region 自动生成类代码（含LoadLine，数组动态长度）
         private static string BuildClassCode(string className, List<FieldInfo> fieldInfos)
         {
@@ -293,7 +315,6 @@ namespace Amanda.EditorTable
             codeBuilder.AppendLine("     * 请勿手动修改！");
             codeBuilder.AppendLine("     */");
             codeBuilder.AppendLine("    [Serializable]");
-            // 👇 这里加了 partial
             codeBuilder.AppendLine($"    public partial class {className} : IEditorTable");
             codeBuilder.AppendLine("    {");
 
@@ -323,7 +344,7 @@ namespace Amanda.EditorTable
                 codeBuilder.AppendLine();
             }
 
-            // ====================== ToDataLine ======================
+            // ====================== ToDataLine（已按要求修改） ======================
             codeBuilder.AppendLine("        public string ToDataLine()");
             codeBuilder.AppendLine("        {");
             codeBuilder.AppendLine("            List<string> columnValues = new List<string>();");
@@ -336,8 +357,8 @@ namespace Amanda.EditorTable
                 if (fieldInfo.IsArray)
                 {
                     string constName = $"{fieldInfo.FieldName}MaxLength";
-                    codeBuilder.AppendLine($"            int maxLen = {constName};");
-                    codeBuilder.AppendLine($"            for (int i = 0; i < maxLen; i++)");
+                    // 修改：直接使用常量名，不定义临时变量
+                    codeBuilder.AppendLine($"            for (int i = 0; i < {constName}; i++)");
                     codeBuilder.AppendLine("            {");
                     codeBuilder.AppendLine($"                if ({fieldInfo.FieldName} != null && i < {fieldInfo.FieldName}.Length)");
                     codeBuilder.AppendLine($"                    columnValues.Add(TableToClassGenerator.ConvertValue({fieldInfo.FieldName}[i]));");
@@ -357,7 +378,17 @@ namespace Amanda.EditorTable
                 }
                 else
                 {
-                    codeBuilder.AppendLine($"            columnValues.Add(TableToClassGenerator.ConvertValue({fieldInfo.FieldName}));");
+                    // 普通字段
+                    if (fieldInfo.FieldName == "ID")
+                    {
+                        // ID 保持原样
+                        codeBuilder.AppendLine($"            columnValues.Add(TableToClassGenerator.ConvertValue({fieldInfo.FieldName}));");
+                    }
+                    else
+                    {
+                        // 修改：直接内联三元表达式，不定义临时变量
+                        codeBuilder.AppendLine($"            columnValues.Add(TableToClassGenerator.IsDefaultValue({fieldInfo.FieldName}) ? string.Empty : TableToClassGenerator.ConvertValue({fieldInfo.FieldName}));");
+                    }
                 }
                 codeBuilder.AppendLine();
             }
